@@ -1,9 +1,10 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import json
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List
@@ -27,6 +28,15 @@ load_dotenv(ROOT_DIR / '.env', encoding='utf-8')  # explicit encoding
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# -----------------------------
+# Logging configuration
+# -----------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 # FastAPI app
@@ -165,15 +175,30 @@ def detect_test_tube_and_extract_color(image):
 # API Endpoints
 # -----------------------------
 @api_router.post("/analyze", response_model=AnalysisResponse)
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(None)):
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Try to detect test tube and extract color using OpenCV
-        detected_rgb = detect_test_tube_and_extract_color(image)
+        # Check if manual color is provided
+        print(f"🔍 Received manual_color parameter: {manual_color}")
+        if manual_color:
+            try:
+                detected_rgb = json.loads(manual_color)
+                print(f"🎨 Manual Color Selection - Using: RGB({detected_rgb[0]}, {detected_rgb[1]}, {detected_rgb[2]})")
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                logger.warning(f"Invalid manual color format: {e}. Falling back to automatic detection.")
+                detected_rgb = None
+        else:
+            print("🔄 No manual color provided, using automatic detection")
+            detected_rgb = None
+        
+        # If no manual color or manual color is invalid, try automatic detection
+        if detected_rgb is None:
+            # Try to detect test tube and extract color using OpenCV
+            detected_rgb = detect_test_tube_and_extract_color(image)
         
         # If test tube detection fails, fall back to the original method
         if detected_rgb is None:
@@ -280,15 +305,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# -----------------------------
-# Logging configuration
-# -----------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # -----------------------------
 # Shutdown event
