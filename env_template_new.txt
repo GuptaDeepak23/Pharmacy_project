@@ -1,0 +1,15 @@
+# Environment Variables for Heavy Metal Detection Kit with AI Recommendations
+
+# MongoDB Configuration
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=heavy_metal_detection
+
+# CORS Configuration
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Google Gemini AI API Key (Required for AI recommendations)
+# Get your free API key from: https://makersuite.google.com/app/apikey
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Optional: Logging Level
+LOG_LEVEL=INFO

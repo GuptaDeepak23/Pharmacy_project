@@ -7,7 +7,7 @@ import logging
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Dict
 import uuid
 from datetime import datetime, timezone
 from PIL import Image
@@ -15,6 +15,7 @@ import io
 import math
 import cv2
 import numpy as np
+from ai_service import ai_service
 
 # -----------------------------
 # Load .env file safely
@@ -85,6 +86,7 @@ class AnalysisResult(BaseModel):
     status: str
     recommendation: str
     detected_rgb: List[int]
+    ai_recommendations: Dict = {}
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AnalysisResponse(BaseModel):
@@ -93,6 +95,7 @@ class AnalysisResponse(BaseModel):
     status: str
     recommendation: str
     detected_rgb: List[int]
+    ai_recommendations: Dict = {}
 
 # -----------------------------
 # Utility functions
@@ -232,6 +235,7 @@ async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(N
             
             detected_rgb = [avg_r, avg_g, avg_b]
 
+        # Find closest match using traditional detection
         min_distance = float('inf')
         closest_match = None
         for ref in REFERENCE_COLORS:
@@ -240,17 +244,27 @@ async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(N
                 min_distance = distance
                 closest_match = ref
 
-        status, recommendation = get_status_and_recommendation(
+        # Determine status and basic recommendation
+        status, basic_recommendation = get_status_and_recommendation(
             closest_match['metal'],
             closest_match['ppm']
+        )
+
+        # Generate AI-powered recommendations and precautions
+        print("🤖 Generating AI recommendations and precautions...")
+        ai_recommendations = ai_service.generate_smart_recommendations(
+            closest_match['metal'],
+            closest_match['ppm'],
+            detected_rgb
         )
 
         result = AnalysisResponse(
             metal=closest_match['metal'],
             concentration=closest_match['ppm'],
             status=status,
-            recommendation=recommendation,
-            detected_rgb=detected_rgb
+            recommendation=basic_recommendation,
+            detected_rgb=detected_rgb,
+            ai_recommendations=ai_recommendations
         )
         
         print(f"✅ Final Analysis Result:")
@@ -258,14 +272,15 @@ async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(N
         print(f"   Concentration: {result.concentration}")
         print(f"   Status: {result.status}")
         print(f"   Detected RGB: {result.detected_rgb}")
-        print(f"   Closest Reference: {closest_match['rgb']} (distance: {min_distance:.2f})")
+        print(f"   AI Recommendations: {len(result.ai_recommendations)} categories")
 
         analysis_record = AnalysisResult(
             metal=result.metal,
             concentration=result.concentration,
             status=result.status,
             recommendation=result.recommendation,
-            detected_rgb=result.detected_rgb
+            detected_rgb=result.detected_rgb,
+            ai_recommendations=result.ai_recommendations
         )
         doc = analysis_record.model_dump()
         doc['timestamp'] = doc['timestamp'].isoformat()
@@ -291,7 +306,17 @@ async def get_results():
 
 @api_router.get("/")
 async def root():
-    return {"message": "AI-Integrated Heavy Metal Detection Kit API"}
+    return {
+        "message": "AI-Enhanced Heavy Metal Detection Kit API",
+        "ai_enabled": ai_service.enabled,
+        "features": [
+            "Traditional color-based detection",
+            "AI-powered recommendations and precautions",
+            "Smart safety advice",
+            "Health risk assessment",
+            "Treatment options guidance"
+        ]
+    }
 
 # -----------------------------
 # Include Router & Middleware
