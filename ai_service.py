@@ -7,11 +7,17 @@ import os
 import base64
 import json
 import logging
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from PIL import Image
 import io
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from dotenv import load_dotenv
+
+# Load .env file if not already loaded
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env', encoding='utf-8')
 
 logger = logging.getLogger(__name__)
 
