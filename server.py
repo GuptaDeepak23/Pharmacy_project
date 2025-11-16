@@ -515,12 +515,26 @@ async def shutdown_db_client():
 # -----------------------------
 app.include_router(api_router)
 
+# CORS Configuration - handle trailing commas and whitespace
+cors_origins_env = os.environ.get('CORS_ORIGINS', '*')
+if cors_origins_env == '*':
+    cors_origins = ['*']
+else:
+    # Split by comma, trim whitespace, filter out empty strings
+    cors_origins = [
+        origin.strip() 
+        for origin in cors_origins_env.split(',') 
+        if origin.strip()
+    ]
+    logger.info(f"🌐 CORS Origins configured: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=False,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=True,  # Changed to True for better compatibility
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Expose headers for better compatibility
 )
 
 # -----------------------------
