@@ -57,19 +57,6 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # -----------------------------
-# Reference colors for detection
-# -----------------------------
-REFERENCE_COLORS = [
-    {"metal": "Copper", "ppm": "Standard", "rgb": [90, 50, 25]},
-    {"metal": "Copper", "ppm": "Standard", "rgb": [132, 103, 38]},
-    {"metal": "Copper", "ppm": "Standard", "rgb": [57, 31, 33]},
-    {"metal": "Copper", "ppm": "Standard", "rgb": [111, 49, 47]},
-    {"metal": "Copper", "ppm": "Standard", "rgb": [186, 96, 68]},
-    {"metal": "Copper", "ppm": "Standard", "rgb": [199, 141, 92]}
-]
-
-
-# -----------------------------
 # Pydantic Models
 # -----------------------------
 class AnalysisResult(BaseModel):
@@ -90,34 +77,38 @@ class AnalysisResponse(BaseModel):
     recommendation: str
     detected_rgb: List[int]
     ai_recommendations: Dict = {}
+    confidence: float = None  # Optional confidence score
+    matchedType: str = None  # Optional match type (exact/approximate)
+
+# -----------------------------
+# Metal Detection Models (New System)
+# -----------------------------
+class MetalRange(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    metal_name: str  # "Mercury" or "Lead"
+    concentration_label: str  # "1–5 ppm", "More than 10 ppm", etc.
+    r_min: int
+    r_max: int
+    g_min: int
+    g_max: int
+    b_min: int
+    b_max: int
+
+class DetectionRequest(BaseModel):
+    r: int = Field(..., ge=0, le=255, description="Red value (0-255)")
+    g: int = Field(..., ge=0, le=255, description="Green value (0-255)")
+    b: int = Field(..., ge=0, le=255, description="Blue value (0-255)")
+
+class DetectionResponse(BaseModel):
+    metal: str
+    concentration: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    matchedType: str  # "exact" or "approximate"
+    input_rgb: List[int]
 
 # -----------------------------
 # Utility functions
 # -----------------------------
-def euclidean_distance(rgb1: List[int], rgb2: List[int]) -> float:
-    return math.sqrt(sum((a - b) ** 2 for a, b in zip(rgb1, rgb2)))
-
-# Convert RGB → HSV
-def rgb_to_hsv_tuple(rgb: List[int]):
-    arr = np.uint8([[rgb]])
-    hsv = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)[0][0]
-    return (int(hsv[0]), int(hsv[1]), int(hsv[2]))
-
-# Calculate HSV color distance (circular hue)
-def hsv_distance(hsv1: tuple, hsv2: tuple) -> float:
-    dh = min(abs(hsv1[0] - hsv2[0]), 180 - abs(hsv1[0] - hsv2[0]))
-    ds = hsv1[1] - hsv2[1]
-    dv = hsv1[2] - hsv2[2]
-    return math.sqrt(dh * dh + ds * ds + dv * dv)
-
-# Optional: normalize lighting
-def normalize_rgb(rgb: List[int]) -> List[int]:
-    arr = np.uint8([[rgb]])
-    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
-    lab[:, :, 0] = cv2.equalizeHist(lab[:, :, 0])
-    norm = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)[0][0]
-    return [int(norm[0]), int(norm[1]), int(norm[2])]
-
 def get_status_and_recommendation(metal: str, ppm: str) -> tuple:
     if "1000ppm" in ppm or "High" in ppm:
         return "Highly Contaminated", "Do not consume. Seek professional water treatment immediately."
@@ -195,6 +186,133 @@ def detect_test_tube_and_extract_color(image):
     return None
 
 # -----------------------------
+# Metal Detection Functions (New System)
+# -----------------------------
+async def seed_metal_ranges():
+    """Seed the database with metal range data"""
+    metal_ranges_collection = db.metal_ranges
+    
+    # Check if data already exists
+    existing_count = await metal_ranges_collection.count_documents({})
+    if existing_count > 0:
+        logger.info(f"Metal ranges already seeded ({existing_count} records)")
+        return
+    
+    # Metal data as provided
+    metal_data = [
+        # Mercury (Hg)
+        {"metal_name": "Mercury", "concentration_label": "More than 10 ppm", "r_min": 190, "r_max": 220, "g_min": 80, "g_max": 110, "b_min": 47, "b_max": 65},
+        {"metal_name": "Mercury", "concentration_label": "5–10 ppm", "r_min": 220, "r_max": 240, "g_min": 110, "g_max": 130, "b_min": 47, "b_max": 65},
+        {"metal_name": "Mercury", "concentration_label": "1–5 ppm", "r_min": 190, "r_max": 215, "g_min": 100, "g_max": 110, "b_min": 46, "b_max": 68},
+        {"metal_name": "Mercury", "concentration_label": "0.01–1 ppm", "r_min": 165, "r_max": 189, "g_min": 90, "g_max": 110, "b_min": 30, "b_max": 65},
+        {"metal_name": "Mercury", "concentration_label": "0.01 ppm", "r_min": 190, "r_max": 200, "g_min": 133, "g_max": 166, "b_min": 95, "b_max": 110},
+        {"metal_name": "Mercury", "concentration_label": "Below 0.01 ppm", "r_min": 210, "r_max": 255, "g_min": 170, "g_max": 255, "b_min": 120, "b_max": 255},
+        
+        # Lead (Pb)
+        {"metal_name": "Lead", "concentration_label": "More than 10 ppm", "r_min": 166, "r_max": 176, "g_min": 65, "g_max": 110, "b_min": 60, "b_max": 80},
+        {"metal_name": "Lead", "concentration_label": "1–10 ppm", "r_min": 170, "r_max": 190, "g_min": 70, "g_max": 110, "b_min": 55, "b_max": 80},
+        {"metal_name": "Lead", "concentration_label": "0.01–1 ppm", "r_min": 165, "r_max": 179, "g_min": 80, "g_max": 90, "b_min": 35, "b_max": 50},
+        {"metal_name": "Lead", "concentration_label": "0.01 ppm", "r_min": 180, "r_max": 195, "g_min": 110, "g_max": 135, "b_min": 60, "b_max": 90},
+        {"metal_name": "Lead", "concentration_label": "Below 0.01 ppm", "r_min": 210, "r_max": 255, "g_min": 170, "g_max": 255, "b_min": 120, "b_max": 255},
+    ]
+    
+    # Insert metal ranges
+    for metal_range in metal_data:
+        metal_range["id"] = str(uuid.uuid4())
+        await metal_ranges_collection.insert_one(metal_range)
+    
+    logger.info(f"✅ Seeded {len(metal_data)} metal ranges into database")
+
+def check_exact_match(r: int, g: int, b: int, metal_range: dict) -> bool:
+    """Check if RGB values exactly match a metal range"""
+    return (
+        metal_range["r_min"] <= r <= metal_range["r_max"] and
+        metal_range["g_min"] <= g <= metal_range["g_max"] and
+        metal_range["b_min"] <= b <= metal_range["b_max"]
+    )
+
+def calculate_distance_to_range(r: int, g: int, b: int, metal_range: dict) -> float:
+    """Calculate distance from RGB to the midpoint of a metal range"""
+    midpoint_r = (metal_range["r_min"] + metal_range["r_max"]) / 2
+    midpoint_g = (metal_range["g_min"] + metal_range["g_max"]) / 2
+    midpoint_b = (metal_range["b_min"] + metal_range["b_max"]) / 2
+    
+    # Manhattan distance as specified
+    distance = abs(r - midpoint_r) + abs(g - midpoint_g) + abs(b - midpoint_b)
+    return distance
+
+async def detect_metal(r: int, g: int, b: int) -> DetectionResponse:
+    """Detect metal and concentration from RGB values"""
+    metal_ranges_collection = db.metal_ranges
+    
+    # Get all metal ranges from database
+    all_ranges = await metal_ranges_collection.find({}).to_list(None)
+    
+    if not all_ranges:
+        raise HTTPException(
+            status_code=500,
+            detail="Metal ranges not found in database. Please seed the database first."
+        )
+    
+    # First, try exact match
+    for metal_range in all_ranges:
+        if check_exact_match(r, g, b, metal_range):
+            # Calculate confidence based on how centered the value is in the range
+            r_range = metal_range["r_max"] - metal_range["r_min"]
+            g_range = metal_range["g_max"] - metal_range["g_min"]
+            b_range = metal_range["b_max"] - metal_range["b_min"]
+            
+            r_center = (metal_range["r_min"] + metal_range["r_max"]) / 2
+            g_center = (metal_range["g_min"] + metal_range["g_max"]) / 2
+            b_center = (metal_range["b_min"] + metal_range["b_max"]) / 2
+            
+            # Calculate how close to center (0 = at edge, 1 = at center)
+            r_confidence = 1.0 - abs(r - r_center) / (r_range / 2) if r_range > 0 else 1.0
+            g_confidence = 1.0 - abs(g - g_center) / (g_range / 2) if g_range > 0 else 1.0
+            b_confidence = 1.0 - abs(b - b_center) / (b_range / 2) if b_range > 0 else 1.0
+            
+            # Average confidence, clamped to [0.8, 1.0] for exact matches
+            confidence = max(0.8, min(1.0, (r_confidence + g_confidence + b_confidence) / 3))
+            
+            return DetectionResponse(
+                metal=metal_range["metal_name"],
+                concentration=metal_range["concentration_label"],
+                confidence=confidence,
+                matchedType="exact",
+                input_rgb=[r, g, b]
+            )
+    
+    # No exact match found, find nearest match
+    min_distance = float('inf')
+    nearest_range = None
+    
+    for metal_range in all_ranges:
+        distance = calculate_distance_to_range(r, g, b, metal_range)
+        if distance < min_distance:
+            min_distance = distance
+            nearest_range = metal_range
+    
+    if nearest_range is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not determine nearest match"
+        )
+    
+    # Calculate confidence for approximate match
+    # Normalize distance (max possible distance is ~765 for RGB)
+    max_possible_distance = 765.0  # 255 + 255 + 255
+    normalized_distance = min_distance / max_possible_distance
+    confidence = max(0.5, 1.0 - normalized_distance)  # Clamp to [0.5, 1.0]
+    
+    return DetectionResponse(
+        metal=nearest_range["metal_name"],
+        concentration=f"Closest Match: {nearest_range['concentration_label']}",
+        confidence=round(confidence, 2),
+        matchedType="approximate",
+        input_rgb=[r, g, b]
+    )
+
+# -----------------------------
 # API Endpoints
 # -----------------------------
 @api_router.post("/analyze", response_model=AnalysisResponse)
@@ -235,61 +353,47 @@ async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(N
             detected_rgb = [avg_r, avg_g, avg_b]
             print(f"🎨 Fallback Method - RGB({avg_r}, {avg_g}, {avg_b})")
 
-        # Normalize + convert to HSV for comparison
-        normalized_rgb = normalize_rgb(detected_rgb)
-        detected_hsv = rgb_to_hsv_tuple(normalized_rgb)
-
-        # Compare against reference colors in HSV
-        min_distance = float('inf')
-        closest_match = None
-        for ref in REFERENCE_COLORS:
-            ref_hsv = rgb_to_hsv_tuple(ref['rgb'])
-            distance = hsv_distance(detected_hsv, ref_hsv)
-            print(f"Comparing detected HSV={detected_hsv} with ref {ref['metal']} HSV={ref_hsv} → distance={distance:.2f}")
-            if distance < min_distance:
-                min_distance = distance
-                closest_match = ref
-
-        # Safety check: ensure closest_match is not None (should always find a match from REFERENCE_COLORS)
-        if closest_match is None:
-            logger.warning(f"⚠️ closest_match is None, defaulting to Copper")
-            closest_match = REFERENCE_COLORS[0]  # Default to first Copper entry
-            print(f"🔄 Forced to use Copper: {closest_match}")
+        # Use metal detection system
+        detection_result = await detect_metal(detected_rgb[0], detected_rgb[1], detected_rgb[2])
         
-        # Force Copper - since REFERENCE_COLORS only contains Copper, this ensures consistency
-        if closest_match.get('metal') != 'Copper':
-            logger.warning(f"⚠️ Detected metal was {closest_match.get('metal')}, forcing to Copper")
-            closest_match = REFERENCE_COLORS[0]
-            print(f"🔄 Forced to Copper: {closest_match}")
-
-        print(f"🎯 Selected match: {closest_match['metal']} - {closest_match['ppm']}")
+        # Map detection result to analysis format
+        metal_name = detection_result.metal
+        concentration = detection_result.concentration
+        
+        # Remove "Closest Match: " prefix if present for cleaner display
+        if concentration.startswith("Closest Match: "):
+            concentration = concentration.replace("Closest Match: ", "")
+        
+        print(f"🎯 Detected: {metal_name} - {concentration} ({detection_result.matchedType})")
         status, recommendation = get_status_and_recommendation(
-            closest_match['metal'],
-            closest_match['ppm']
+            metal_name,
+            concentration
         )
 
         # Generate AI recommendations if enabled, otherwise use basic recommendations
         if ai_service_enabled and ai_service:
             print("🤖 Generating AI recommendations...")
             ai_recommendations = ai_service.generate_smart_recommendations(
-                closest_match['metal'],
-                closest_match['ppm'],
+                metal_name,
+                concentration,
                 detected_rgb
             )
         else:
             print("📋 Using basic recommendations (AI disabled)...")
             ai_recommendations = get_basic_ai_recommendations(
-                closest_match['metal'],
-                closest_match['ppm']
+                metal_name,
+                concentration
             )
 
         result = AnalysisResponse(
-            metal=closest_match['metal'],
-            concentration=closest_match['ppm'],
+            metal=metal_name,
+            concentration=concentration,
             status=status,
             recommendation=recommendation,
             detected_rgb=detected_rgb,
-            ai_recommendations=ai_recommendations
+            ai_recommendations=ai_recommendations,
+            confidence=detection_result.confidence,
+            matchedType=detection_result.matchedType
         )
 
         # Save to DB
@@ -317,6 +421,56 @@ async def get_results():
         logger.error(f"Error fetching results: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching results: {str(e)}")
 
+@api_router.post("/detect-metal", response_model=DetectionResponse)
+async def detect_metal_endpoint(request: DetectionRequest):
+    """
+    Detect metal and concentration from RGB values.
+    
+    - **r**: Red value (0-255)
+    - **g**: Green value (0-255)
+    - **b**: Blue value (0-255)
+    
+    Returns:
+    - **metal**: Detected metal name (Mercury or Lead)
+    - **concentration**: Concentration level
+    - **confidence**: Confidence score (0.0-1.0)
+    - **matchedType**: "exact" or "approximate"
+    - **input_rgb**: Original RGB input
+    """
+    try:
+        result = await detect_metal(request.r, request.g, request.b)
+        logger.info(f"Metal detection: {result.metal} - {result.concentration} ({result.matchedType})")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error detecting metal: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error detecting metal: {str(e)}")
+
+@api_router.get("/metal-ranges", response_model=List[MetalRange])
+async def get_metal_ranges():
+    """Get all metal ranges from database"""
+    try:
+        metal_ranges_collection = db.metal_ranges
+        ranges = await metal_ranges_collection.find({}).to_list(None)
+        # Remove MongoDB _id field
+        for r in ranges:
+            r.pop("_id", None)
+        return ranges
+    except Exception as e:
+        logger.error(f"Error fetching metal ranges: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching metal ranges: {str(e)}")
+
+@api_router.post("/seed-metal-ranges")
+async def seed_metal_ranges_endpoint():
+    """Manually seed metal ranges (admin endpoint)"""
+    try:
+        await seed_metal_ranges()
+        return {"message": "Metal ranges seeded successfully"}
+    except Exception as e:
+        logger.error(f"Error seeding metal ranges: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error seeding metal ranges: {str(e)}")
+
 @api_router.get("/")
 async def root():
     return {
@@ -328,9 +482,15 @@ async def root():
             "AI-powered recommendations" if ai_service_enabled else "Basic recommendations",
             "Smart safety advice",
             "Health risk assessment",
-            "Treatment guidance"
+            "Treatment guidance",
+            "RGB-based metal detection (Mercury & Lead)"
         ],
-        "note": "Set USE_AI=true in .env to enable AI features" if not USE_AI else "AI service enabled"
+        "note": "Set USE_AI=true in .env to enable AI features" if not USE_AI else "AI service enabled",
+        "endpoints": {
+            "detect_metal": "/api/detect-metal (POST)",
+            "metal_ranges": "/api/metal-ranges (GET)",
+            "seed_ranges": "/api/seed-metal-ranges (POST)"
+        }
     }
 
 # -----------------------------
@@ -341,6 +501,8 @@ async def startup_db_check():
     try:
         await client.list_database_names()
         print("✅ MongoDB is connected successfully!")
+        # Seed metal ranges on startup
+        await seed_metal_ranges()
     except Exception as e:
         print(f"❌ MongoDB connection failed: {e}")
 
