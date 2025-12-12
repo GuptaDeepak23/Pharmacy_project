@@ -89,6 +89,11 @@ class AIService:
         return f"""
 You are a water quality expert providing safety recommendations and precautions for heavy metal contamination.
 
+IMPORTANT SAFETY THRESHOLD:
+- For both Lead (Pb) and Mercury (Hg), 0.01 ppm is considered SAFE according to safety standards.
+- Concentrations at exactly 0.01 ppm or below 0.01 ppm are safe for consumption.
+- Only concentrations above 0.01 ppm require treatment or precautions.
+
 DETECTED CONTAMINATION:
 - Metal Type: {metal}
 - Concentration Level: {concentration}
@@ -185,7 +190,7 @@ Make recommendations practical, scientifically accurate, and easy to understand 
                 "professional_help": "Contact water quality specialist for detailed analysis and treatment options.",
                 "additional_precautions": "Use filtered or boiled water for all consumption until treated."
             }
-        elif "0.1ppm" in concentration or "Low" in concentration:
+        elif "0.01–1 ppm" in concentration or ("0.1ppm" in concentration and "0.01" not in concentration) or "Low" in concentration:
             return {
                 "immediate_actions": ["Boil water before drinking", "Use water filter", "Monitor for changes"],
                 "treatment_options": ["Boiling", "Basic filtration", "Regular testing"],
@@ -193,6 +198,15 @@ Make recommendations practical, scientifically accurate, and easy to understand 
                 "prevention_tips": ["Regular testing", "Maintain good water practices", "Monitor source quality"],
                 "professional_help": "Consider professional testing for comprehensive analysis.",
                 "additional_precautions": "Continue monitoring water quality regularly."
+            }
+        elif "0.01 ppm" in concentration or "Below 0.01 ppm" in concentration:
+            return {
+                "immediate_actions": ["Water is safe for consumption", "Continue regular testing", "Maintain good practices"],
+                "treatment_options": ["Optional basic filtration", "Regular testing", "Source protection"],
+                "health_risks": "No immediate health risks detected. 0.01 ppm is within safe limits for both Lead and Mercury according to safety standards.",
+                "prevention_tips": ["Regular testing", "Source protection", "Maintain water systems"],
+                "professional_help": "Routine testing recommended for ongoing monitoring.",
+                "additional_precautions": "Water is safe to consume. Continue regular testing to ensure water quality."
             }
         else:
             return {

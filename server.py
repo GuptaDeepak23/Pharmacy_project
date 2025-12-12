@@ -114,8 +114,10 @@ def get_status_and_recommendation(metal: str, ppm: str) -> tuple:
         return "Highly Contaminated", "Do not consume. Seek professional water treatment immediately."
     elif "10ppm" in ppm or "Medium" in ppm:
         return "Contaminated", "Not safe for drinking. Use filtration or boiling before use."
-    elif "0.1ppm" in ppm or "Low" in ppm:
+    elif "0.01–1 ppm" in ppm or ("0.1ppm" in ppm and "0.01" not in ppm) or "Low" in ppm:
         return "Slight Contamination Detected", "Boil or filter water before use."
+    elif "0.01 ppm" in ppm or "Below 0.01 ppm" in ppm:
+        return "Safe", "Water is safe for consumption. 0.01 ppm is within safe limits for both Lead and Mercury."
     else:
         return "Safe", "Water is safe for consumption."
 
@@ -139,7 +141,7 @@ def get_basic_ai_recommendations(metal: str, concentration: str) -> Dict:
             "professional_help": "Contact water quality specialist for detailed analysis and treatment options.",
             "additional_precautions": "Use filtered or boiled water for all consumption until treated."
         }
-    elif "0.1ppm" in concentration or "Low" in concentration:
+    elif "0.01–1 ppm" in concentration or ("0.1ppm" in concentration and "0.01" not in concentration) or "Low" in concentration:
         return {
             "immediate_actions": ["Boil water before drinking", "Use water filter", "Monitor for changes"],
             "treatment_options": ["Boiling", "Basic filtration", "Regular testing"],
@@ -147,6 +149,15 @@ def get_basic_ai_recommendations(metal: str, concentration: str) -> Dict:
             "prevention_tips": ["Regular testing", "Maintain good water practices", "Monitor source quality"],
             "professional_help": "Consider professional testing for comprehensive analysis.",
             "additional_precautions": "Continue monitoring water quality regularly."
+        }
+    elif "0.01 ppm" in concentration or "Below 0.01 ppm" in concentration:
+        return {
+            "immediate_actions": ["Water is safe for consumption", "Continue regular testing", "Maintain good practices"],
+            "treatment_options": ["Optional basic filtration", "Regular testing", "Source protection"],
+            "health_risks": "No immediate health risks detected. 0.01 ppm is within safe limits for both Lead and Mercury according to safety standards.",
+            "prevention_tips": ["Regular testing", "Source protection", "Maintain water systems"],
+            "professional_help": "Routine testing recommended for ongoing monitoring.",
+            "additional_precautions": "Water is safe to consume. Continue regular testing to ensure water quality."
         }
     else:
         return {
@@ -363,7 +374,7 @@ async def analyze_image(file: UploadFile = File(...), manual_color: str = Form(N
         # Remove "Closest Match: " prefix if present for cleaner display
         if concentration.startswith("Closest Match: "):
             concentration = concentration.replace("Closest Match: ", "")
-        
+
         print(f"🎯 Detected: {metal_name} - {concentration} ({detection_result.matchedType})")
         status, recommendation = get_status_and_recommendation(
             metal_name,
