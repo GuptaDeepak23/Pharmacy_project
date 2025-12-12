@@ -110,17 +110,22 @@ class DetectionResponse(BaseModel):
 # Utility functions
 # -----------------------------
 def get_status_and_recommendation(metal: str, ppm: str) -> tuple:
-    # Check for 0.01 ppm first (exact match) - safe for both Lead and Mercury
-    if "0.01 ppm" in ppm:
+    # Check for exact 0.01 ppm first - safe for both Lead and Mercury
+    if ppm == "0.01 ppm":
         return "Safe", "Water is safe for consumption."
-    elif "1000ppm" in ppm or "High" in ppm:
+    elif "More than 10 ppm" in ppm or "1000ppm" in ppm or "High" in ppm:
         return "Highly Contaminated", "Do not consume. Seek professional water treatment immediately."
-    elif "10ppm" in ppm or "Medium" in ppm:
+    elif "5–10 ppm" in ppm or "1–10 ppm" in ppm or "10ppm" in ppm or "Medium" in ppm:
         return "Contaminated", "Not safe for drinking. Use filtration or boiling before use."
-    elif "0.1ppm" in ppm or "Low" in ppm:
+    elif "1–5 ppm" in ppm:
+        return "Contaminated", "Not safe for drinking. Use filtration or boiling before use."
+    elif "0.01–1 ppm" in ppm or "0.1ppm" in ppm or "Low" in ppm:
         return "Slight Contamination Detected", "Boil or filter water before use."
-    else:
+    elif "Below 0.01 ppm" in ppm:
         return "Safe", "Water is safe for consumption."
+    else:
+        # Default to contaminated for safety if concentration is not recognized
+        return "Contaminated", "Not safe for drinking. Use filtration or boiling before use."
 
 def get_basic_ai_recommendations(metal: str, concentration: str) -> Dict:
     """Basic recommendations when AI service is disabled"""
