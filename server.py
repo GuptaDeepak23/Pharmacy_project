@@ -271,6 +271,16 @@ async def detect_metal(r: int, g: int, b: int) -> DetectionResponse:
             input_rgb=[r, g, b]
         )
 
+    # Special check for Dark/Safe range (e.g., empty or dark sample so it doesn't match Lead)
+    if r < 100 and g < 100 and b < 100:
+        return DetectionResponse(
+            metal="Safe",
+            concentration="No heavy metal detected",
+            confidence=1.0,
+            matchedType="exact",
+            input_rgb=[r, g, b]
+        )
+
     metal_ranges_collection = db.metal_ranges
     
     # Get all metal ranges from database
