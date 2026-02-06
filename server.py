@@ -261,6 +261,16 @@ def calculate_distance_to_range(r: int, g: int, b: int, metal_range: dict) -> fl
 
 async def detect_metal(r: int, g: int, b: int) -> DetectionResponse:
     """Detect metal and concentration from RGB values"""
+    # Special check for Green range as requested
+    if r == 0 and 128 <= g <= 255 and b == 0:
+        return DetectionResponse(
+            metal="Safe",
+            concentration="No heavy metal detected",
+            confidence=1.0,
+            matchedType="exact",
+            input_rgb=[r, g, b]
+        )
+
     metal_ranges_collection = db.metal_ranges
     
     # Get all metal ranges from database
